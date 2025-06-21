@@ -6,7 +6,7 @@ export WANDB_ENTITY=shuozhe
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 ACCELERATE_LOG_LEVEL=info accelerate launch \
-  --config_file recipes/accelerate_configs/zero2.yaml \
+  --config_file recipes/accelerate_configs/zero3.yaml \
   --num_processes=3 \
   src/open_r1/grpo.py \
   --config recipes/grpo.yaml \

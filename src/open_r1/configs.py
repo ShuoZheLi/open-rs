@@ -50,6 +50,13 @@ class GRPOConfig(trl.GRPOConfig):
         default=None,
         metadata={"help": ("The project to store runs under.")},
     )
+    vllm_dtype: Optional[str] = field(
+        default="auto",
+        metadata={
+            "help": "Data type to use for vLLM generation. If set to 'auto', the data type will be automatically "
+            "determined based on the model configuration. Find the supported values in the vLLM documentation."
+        },
+    )
 
 
 @dataclass
