@@ -54,3 +54,4 @@ save_steps: 50
 seed: 42
 temperature: 0.7
 warmup_ratio: 0.1
+wandb_project: open-rs

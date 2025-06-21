@@ -2,6 +2,8 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 export WANDB_API_KEY=190caefcc554590440e42593bfd6931f88f46f16
 export WANDB_ENTITY=shuozhe
+export WANDB_PROJECT=open-rs
+
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 ACCELERATE_LOG_LEVEL=info accelerate launch \
@@ -10,5 +12,6 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
   src/open_r1/grpo.py \
   --config recipes/grpo.yaml \
   --cosine_max_len 3584 \
-  --dataset_name /data/shuozhe/saved_dataset/open-rs \
-  --model_name_or_path /data/shuozhe/saved_model/Qwen2.5-0.5B \
+  --wandb_project Entropy\
+  --dataset_name /teamspace/studios/this_studio/saved_datasets/open-rs \
+  --model_name_or_path /teamspace/studios/this_studio/saved_models/DeepSeek-R1-Distill-Qwen-1.5B \
