@@ -1,8 +1,7 @@
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+# export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 export WANDB_API_KEY=190caefcc554590440e42593bfd6931f88f46f16
 export WANDB_ENTITY=shuozhe
-export WANDB_PROJECT=open-rs
 
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
@@ -15,3 +14,4 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
   --wandb_project Entropy\
   --dataset_name /teamspace/studios/this_studio/saved_datasets/open-rs \
   --model_name_or_path /teamspace/studios/this_studio/saved_models/DeepSeek-R1-Distill-Qwen-1.5B \
+> ./logs/rs3.log 2>&1
