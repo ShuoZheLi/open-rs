@@ -24,8 +24,8 @@ from datasets import load_dataset
 from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 
-from open_r1.configs import GRPOConfig
-from open_r1.rewards import (
+from configs import GRPOConfig
+from rewards import (
     accuracy_reward,
     code_reward,
     format_reward,
@@ -36,10 +36,12 @@ from open_r1.rewards import (
     reasoning_steps_reward,
     tag_count_reward,
 )
-from open_r1.utils import get_tokenizer
-from open_r1.utils.callbacks import get_callbacks
-from open_r1.utils.wandb_logging import init_wandb_training
-from trl import GRPOTrainer, ModelConfig, ScriptArguments, TrlParser, get_peft_config
+from utils import get_tokenizer
+from utils.callbacks import get_callbacks
+from utils.wandb_logging import init_wandb_training
+# from trl import GRPOTrainer, ModelConfig, ScriptArguments, TrlParser, get_peft_config
+from trl import ModelConfig, ScriptArguments, TrlParser, get_peft_config
+from x_grpo_trainer import GRPOTrainer
 
 
 logger = logging.getLogger(__name__)
@@ -187,7 +189,10 @@ def main(script_args, training_args, model_args):
             prompt.append({"role": "system", "content": training_args.system_prompt})
 
         prompt.append({"role": "user", "content": example["problem"]})
-        return {"prompt": prompt}
+        return {
+            "grpo_prompt":
+                {"prompt": prompt}
+        }
 
     dataset = dataset.map(make_conversation)
 

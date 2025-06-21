@@ -9,14 +9,14 @@ from typing import Dict
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
 
-from .utils import is_e2b_available
+from utils import is_e2b_available
 
 
-if is_e2b_available():
-    from dotenv import load_dotenv
-    from e2b_code_interpreter import AsyncSandbox
+# if is_e2b_available():
+#     from dotenv import load_dotenv
+#     from e2b_code_interpreter import AsyncSandbox
 
-    load_dotenv()
+#     load_dotenv()
 
 
 def accuracy_reward(completions, solution, **kwargs):
@@ -498,26 +498,26 @@ def run_async_from_sync(scripts: list[str], language: str) -> list[float]:
     return rewards
 
 
-async def run_async(scripts: list[str], language: str) -> list[float]:
-    # Create the sandbox by hand, currently there's no context manager for this version
-    sbx = await AsyncSandbox.create(timeout=30, request_timeout=3)
+# async def run_async(scripts: list[str], language: str) -> list[float]:
+#     # Create the sandbox by hand, currently there's no context manager for this version
+#     sbx = await AsyncSandbox.create(timeout=30, request_timeout=3)
 
-    # Create a list of tasks for running scripts concurrently
-    tasks = [run_script(sbx, script, language) for script in scripts]
+#     # Create a list of tasks for running scripts concurrently
+#     tasks = [run_script(sbx, script, language) for script in scripts]
 
-    # Wait for all tasks to complete and gather their results as they finish
-    results = await asyncio.gather(*tasks)
-    rewards = list(results)  # collect results
+#     # Wait for all tasks to complete and gather their results as they finish
+#     results = await asyncio.gather(*tasks)
+#     rewards = list(results)  # collect results
 
-    # Kill the sandbox after all the tasks are complete
-    await sbx.kill()
+#     # Kill the sandbox after all the tasks are complete
+#     await sbx.kill()
 
-    return rewards
+#     return rewards
 
 
-async def run_script(sbx: AsyncSandbox, script: str, language: str) -> float:
-    execution = await sbx.run_code(script, language=language)
-    try:
-        return float(execution.text)
-    except (TypeError, ValueError):
-        return 0.0
+# async def run_script(sbx: AsyncSandbox, script: str, language: str) -> float:
+#     execution = await sbx.run_code(script, language=language)
+#     try:
+#         return float(execution.text)
+#     except (TypeError, ValueError):
+#         return 0.0
