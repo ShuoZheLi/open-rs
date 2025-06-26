@@ -6,12 +6,15 @@ export WANDB_ENTITY=shuozhe
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 ACCELERATE_LOG_LEVEL=info accelerate launch \
-  --config_file recipes/accelerate_configs/zero3.yaml \
+  --config_file recipes/accelerate_configs/zero2.yaml \
   --num_processes=3 \
   src/open_r1/grpo.py \
   --config recipes/grpo.yaml \
   --cosine_max_len 3584 \
+  --beta 0.0001 \
+  --num_train_epochs 2\
   --wandb_project Entropy\
-  --dataset_name /teamspace/studios/this_studio/saved_datasets/open-rs \
-  --model_name_or_path /teamspace/studios/this_studio/saved_models/DeepSeek-R1-Distill-Qwen-1.5B \
-> ./logs/rs3.log 2>&1
+  --output_dir data/R1-Distill-Qwen-1.5B-noKL-1500-1e-4 \
+  --dataset_name xiaodongguaAIGC/X-R1-1500 \
+  --model_name_or_path /nfs/shuozhe/saved_model/DeepSeek-R1-Distill-Qwen-1.5B \
+> ./logs/rs3_noKL-1500-1e-4.log 2>&1

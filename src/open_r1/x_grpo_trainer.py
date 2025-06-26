@@ -580,46 +580,64 @@ class GRPOTrainer(Trainer):
         if self._signature_columns is None:
             self._signature_columns = ["prompt"]
 
-    def _get_train_sampler(self) -> Sampler:
-        # Returns a sampler that
-        # 1. ensures each prompt is repeated across multiple processes. This guarantees that identical prompts are
-        #    distributed to different GPUs, allowing rewards to be computed and normalized correctly within each prompt
-        #    group. Using the same seed across processes ensures consistent prompt assignment, preventing discrepancies
-        #    in group formation.
-        # 2. repeats the batch multiple times to allow reusing generations across multiple updates. Refer to
-        #    _prepare_inputs to see how the generations are stored and reused.
+    # def _get_train_sampler(self) -> Sampler:
+    #     # Returns a sampler that
+    #     # 1. ensures each prompt is repeated across multiple processes. This guarantees that identical prompts are
+    #     #    distributed to different GPUs, allowing rewards to be computed and normalized correctly within each prompt
+    #     #    group. Using the same seed across processes ensures consistent prompt assignment, preventing discrepancies
+    #     #    in group formation.
+    #     # 2. repeats the batch multiple times to allow reusing generations across multiple updates. Refer to
+    #     #    _prepare_inputs to see how the generations are stored and reused.
 
-        # In the following figure, the values are the prompt indices. The first row shows the first sampled batch, the
-        # second row shows the second sampled batch, and so on.
-        #
-        #                                     |     GPU 0     |     GPU 1     |     GPU 2    |
-        #
-        #               global_step   step     <───────>  num_generations=3
-        #                                      <───────────> per_device_train_batch_size=4
-        #                ▲   0          0      0   0   0   1   1   1   2   2   2   3   3   3  │
-        #  grad_accum=3  │   0          1      4   4   4   5   5   5   6   6   6   7   7   7  │ Generate completions for each prompt
-        #                ▼   0          2      8   8   8   9   9   9  10  10  10  11  11  11  │
-        #
-        #                    1          3      0   0   0   1   1   1   2   2   2   3   3   3  │ The sampled prompts are the same as in the first iteration
-        #                    1          4      4   4   4   5   5   5   6   6   6   7   7   7  │ Reuse the completions (here, once, because num_iterations=2)
-        #                    1          5      8   8   8   9   9   9  10  10  10  11  11  11  │
-        #
-        #                    2          6     12  12  12  13  13  13  14  14  14  15  15  15
-        #                    2          7     16  16  16  17  17  17  18  18  18  19  19  19
-        #                    2          8     20  20  20  21  21  21  22  22  22  23  23  23
-        #                                          ...
+    #     # In the following figure, the values are the prompt indices. The first row shows the first sampled batch, the
+    #     # second row shows the second sampled batch, and so on.
+    #     #
+    #     #                                     |     GPU 0     |     GPU 1     |     GPU 2    |
+    #     #
+    #     #               global_step   step     <───────>  num_generations=3
+    #     #                                      <───────────> per_device_train_batch_size=4
+    #     #                ▲   0          0      0   0   0   1   1   1   2   2   2   3   3   3  │
+    #     #  grad_accum=3  │   0          1      4   4   4   5   5   5   6   6   6   7   7   7  │ Generate completions for each prompt
+    #     #                ▼   0          2      8   8   8   9   9   9  10  10  10  11  11  11  │
+    #     #
+    #     #                    1          3      0   0   0   1   1   1   2   2   2   3   3   3  │ The sampled prompts are the same as in the first iteration
+    #     #                    1          4      4   4   4   5   5   5   6   6   6   7   7   7  │ Reuse the completions (here, once, because num_iterations=2)
+    #     #                    1          5      8   8   8   9   9   9  10  10  10  11  11  11  │
+    #     #
+    #     #                    2          6     12  12  12  13  13  13  14  14  14  15  15  15
+    #     #                    2          7     16  16  16  17  17  17  18  18  18  19  19  19
+    #     #                    2          8     20  20  20  21  21  21  22  22  22  23  23  23
+    #     #                                          ...
+    #     effective_batch_size = (
+    #         self.args.per_device_train_batch_size
+    #         * self.accelerator.num_processes
+    #         * self.args.gradient_accumulation_steps
+    #     )
+    #     return RepeatRandomSampler(
+    #         data_source=self.train_dataset,
+    #         mini_repeat_count=self.num_generations,
+    #         batch_size=effective_batch_size // self.num_generations,
+    #         repeat_count=self.num_iterations,
+    #         seed=self.args.seed,
+    #     )
+
+    def _get_train_sampler(self, train_dataset=None) -> Sampler:
+        if train_dataset is None:
+            train_dataset = self.train_dataset
+
         effective_batch_size = (
             self.args.per_device_train_batch_size
             * self.accelerator.num_processes
             * self.args.gradient_accumulation_steps
         )
         return RepeatRandomSampler(
-            data_source=self.train_dataset,
+            data_source=train_dataset,
             mini_repeat_count=self.num_generations,
             batch_size=effective_batch_size // self.num_generations,
             repeat_count=self.num_iterations,
             seed=self.args.seed,
-        )
+    )
+
 
     def _get_eval_sampler(self, eval_dataset) -> Sampler:
         # See _get_train_sampler for an explanation of the sampler.
