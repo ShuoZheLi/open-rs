@@ -57,6 +57,10 @@ class GRPOConfig(trl.GRPOConfig):
             "determined based on the model configuration. Find the supported values in the vLLM documentation."
         },
     )
+    entropy_coeff: float = field(
+        default=0.0, 
+        metadata={"help": "Coefficient for the entropy bonus to encourage exploration."}
+    )
 
 
 @dataclass

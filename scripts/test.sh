@@ -10,9 +10,11 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
   --num_processes=1 \
   src/open_r1/grpo.py \
   --config recipes/grpo.yaml\
-  --model_name_or_path /teamspace/studios/this_studio/saved_models/DeepSeek-R1-Distill-Qwen-1.5B \
+  --model_name_or_path /nfs/shuozhe/saved_model/Qwen2.5-0.5B \
   --per_device_eval_batch_size 2 \
   --per_device_train_batch_size 2 \
   --gradient_accumulation_steps 1 \
   --num_generations 2 \
-  --dataset_name /teamspace/studios/this_studio/saved_datasets/open-rs \
+  --entropy_coeff 0.001 \
+  --dataset_name xiaodongguaAIGC/X-R1-1500 \
+  --output_dir data/test \

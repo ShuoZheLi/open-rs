@@ -11,10 +11,14 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
   src/open_r1/grpo.py \
   --config recipes/grpo.yaml \
   --cosine_max_len 3584 \
-  --beta 0.0001 \
+  --beta 0 \
+  --entropy_coeff 0.01 \
   --num_train_epochs 2\
   --wandb_project Entropy\
-  --output_dir data/R1-Distill-Qwen-1.5B-noKL-1500-1e-4 \
+  --output_dir data/R1-Distill-Qwen-1.5B-noKL-1500-ec-1e-2 \
   --dataset_name xiaodongguaAIGC/X-R1-1500 \
   --model_name_or_path /nfs/shuozhe/saved_model/DeepSeek-R1-Distill-Qwen-1.5B \
-> ./logs/rs3_noKL-1500-1e-4.log 2>&1
+> ./logs/R1-Distill-Qwen-1.5B-noKL-1500-ec-1e-2.log 2>&1
+
+
+  # --beta 0.0001 \

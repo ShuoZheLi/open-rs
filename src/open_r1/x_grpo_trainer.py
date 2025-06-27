@@ -310,6 +310,9 @@ class GRPOTrainer(Trainer):
         if args.gradient_checkpointing:
             model = self._enable_gradient_checkpointing(model, args)
 
+        # Entropy bonus
+        self.entropy_coeff = args.entropy_coeff
+
         # Reference model
         self.beta = args.beta
         # if self.beta == 0.0:
@@ -798,21 +801,27 @@ class GRPOTrainer(Trainer):
             prompt_ids = prompt_completion_ids[:, :prompt_length]
             completion_ids = prompt_completion_ids[:, prompt_length:]
 
-                # -------------------- Compute entropy --------------------
-        with torch.no_grad():
-            # Forward pass for logits
-            outputs = self.model(input_ids=prompt_completion_ids, attention_mask=torch.cat([prompt_mask, torch.ones_like(completion_ids)], dim=1))
-            logits = outputs.logits[:, -completion_ids.size(1):, :]  # shape: (B, C, V)
+        
+        # -------------------- Compute entropy --------------------
+        # Prepare inputs
+        attention_mask = torch.cat([prompt_mask, torch.ones_like(completion_ids)], dim=1)
 
-            probs = torch.softmax(logits, dim=-1)  # (B, C, V)
-            log_probs = torch.log_softmax(logits, dim=-1)  # (B, C, V)
-            entropy = -(probs * log_probs).sum(dim=-1)  # (B, C) -- per-token entropy
+        # Use no_grad only when entropy is not used (for efficiency)
+        context = torch.no_grad() if self.entropy_coeff == 0.0 else contextlib.nullcontext()
+        with context:
+            outputs = self.model(input_ids=prompt_completion_ids, attention_mask=attention_mask)
+            logits = outputs.logits[:, -completion_ids.size(1):, :]  # (B, C, V)
+            probs = torch.softmax(logits, dim=-1)                   # (B, C, V)
+            log_probs = torch.log_softmax(logits, dim=-1)           # (B, C, V)
+            entropy_per_token = entropy = -(probs * log_probs).sum(dim=-1)              # (B, C)
 
-            # Optionally, mean entropy per sequence
-            entropy_mask = completion_ids != self.processing_class.pad_token_id
-            mean_entropy_per_sample = (entropy * entropy_mask).sum(dim=1) / entropy_mask.sum(dim=1)
+        # Mask and aggregate per-sample mean entropy
+        # entropy_mask = completion_ids != self.processing_class.pad_token_id
+        # entropy_per_token = (entropy * entropy_mask).sum(dim=1) / entropy_mask.sum(dim=1)
 
-            # print("Mean entropy per response:", mean_entropy_per_sample)
+        # entropy_mask = completion_ids != self.processing_class.pad_token_id
+        # entropy_per_token = (entropy * entropy_mask).sum(dim=1) / entropy_mask.sum(dim=1)
+
 
         # Mask everything after the first EOS token
         is_eos = completion_ids == self.processing_class.eos_token_id
@@ -920,10 +929,10 @@ class GRPOTrainer(Trainer):
 
         # Gather across all processes
         completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
-        all_entropy = self.accelerator.gather_for_metrics(mean_entropy_per_sample)
+        # all_sample_entropy = self.accelerator.gather_for_metrics(entropy_per_token)
         self._metrics[mode]["completion_length"].append(completion_length)
-        self._metrics[mode]["response_entropy_avg"].append(all_entropy.mean().item())
-        self._metrics[mode]["response_entropy_std"].append(all_entropy.std().item())
+        # self._metrics[mode]["response_entropy_avg"].append(all_sample_entropy.mean().item())
+        # self._metrics[mode]["response_entropy_std"].append(all_sample_entropy.std().item())
 
         reward_per_func = rewards_per_func.mean(0)
         for i, reward_func in enumerate(self.reward_funcs):
@@ -1024,6 +1033,7 @@ class GRPOTrainer(Trainer):
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "entropy_per_token": entropy_per_token,
         }
 
     @profiling_decorator
@@ -1069,14 +1079,25 @@ class GRPOTrainer(Trainer):
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon, 1 + self.epsilon)
         per_token_loss1 = coef_1 * advantages.unsqueeze(1)
         per_token_loss2 = coef_2 * advantages.unsqueeze(1)
-        per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
-        if self.beta != 0.0:
-            per_token_loss = per_token_loss + self.beta * per_token_kl
-        loss = (per_token_loss * completion_mask).sum() / completion_mask.sum()
+        
+        # adv term in GRPO
+        adv_per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
 
-        # total_loss = loss + 0.15 * sft_loss
-        total_loss = loss
-        # sft_loss = sft_loss * 0.15
+        # KL penalty to keep the model close to the reference model
+        kl_loss = self.beta * per_token_kl
+        adv_kl_per_token_loss = adv_per_token_loss + kl_loss
+
+        # apply token level (include EOS token) entropy bonus to encourage exploration
+        entropy_per_token = inputs["entropy_per_token"]
+        entropy_loss = self.entropy_coeff * entropy_per_token
+        adv_kl_ent_per_token_loss = adv_kl_per_token_loss - entropy_loss
+
+        total_loss = (adv_kl_ent_per_token_loss * completion_mask).sum() / completion_mask.sum()
+
+        with torch.no_grad():
+            adv_per_token_loss = (adv_per_token_loss * completion_mask).sum() / completion_mask.sum()
+            kl_loss = (kl_loss * completion_mask).sum() / completion_mask.sum()
+            entropy_loss = (entropy_loss * completion_mask).sum() / completion_mask.sum()
 
         # Log the metrics
         mode = "eval" if self.control.should_evaluate else "train"
@@ -1087,9 +1108,19 @@ class GRPOTrainer(Trainer):
 
         is_clipped = (per_token_loss1 < per_token_loss2).float()
         clip_ratio = (is_clipped * completion_mask).sum() / completion_mask.sum()
+
+        # Entropy of Tokens include EOS token
+        entropy_per_sample = (entropy_per_token * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)
+        entropy_per_sample = self.accelerator.gather_for_metrics(entropy_per_sample)
+        self._metrics[mode]["response_entropy_avg"].append(entropy_per_sample.mean().item())
+        self._metrics[mode]["response_entropy_std"].append(entropy_per_sample.std().item())
+
         self._metrics[mode]["clip_ratio"].append(self.accelerator.gather_for_metrics(clip_ratio).mean().item())
         # self._metrics[mode]["sft_loss"].append(self.accelerator.gather_for_metrics(sft_loss).mean().item())
-        self._metrics[mode]["grpo_loss"].append(self.accelerator.gather_for_metrics(loss).mean().item())
+        self._metrics[mode]["adv_per_token_loss"].append(self.accelerator.gather_for_metrics(adv_per_token_loss).mean().item())
+        self._metrics[mode]["kl_loss"].append(self.accelerator.gather_for_metrics(kl_loss).mean().item())
+        self._metrics[mode]["entropy_loss"].append(self.accelerator.gather_for_metrics(entropy_loss).mean().item())
+        self._metrics[mode]["total_loss"].append(self.accelerator.gather_for_metrics(total_loss).mean().item())
         return total_loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys: Optional[list[str]] = None):
