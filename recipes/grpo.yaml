@@ -46,6 +46,7 @@ report_to:
 reward_funcs:
 - format
 - cosine
+- accuracy
 reward_weights:
 - 1.0
 - 2.0
