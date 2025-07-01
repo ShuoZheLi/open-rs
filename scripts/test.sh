@@ -17,4 +17,6 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
   --num_generations 2 \
   --entropy_coeff 0.001 \
   --dataset_name xiaodongguaAIGC/X-R1-1500 \
+  --mask_truncated_completions True \
+  --token_entropy_percentile_threshold 0.1 \
   --output_dir data/test \

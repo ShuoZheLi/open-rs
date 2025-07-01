@@ -23,8 +23,16 @@ numpy==1.26.4
 scipy==1.13.0
 scikit-learn==1.4.2
 trl
+# Successfully uninstalled trl-0.16.0.dev0
 vllm==0.7.2
+# 0.7.2
 wandb>=0.19.1
 peft>=0.14.0
 # flash-attn
 # conda install -c conda-forge flash-attn
+
+# conda install -c conda-forge cuda-toolkit=xxxx
+
+# pip install flash-attn --no-build-isolation --no-cache-dir
+
+# pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121

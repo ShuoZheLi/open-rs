@@ -62,6 +62,38 @@ class GRPOConfig(trl.GRPOConfig):
         metadata={"help": "Coefficient for the entropy bonus to encourage exploration."}
     )
 
+    mask_truncated_completions: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to mask truncated completions. If set to True, the model will not consider the "
+            "truncated part of the completion when calculating the loss."
+        },
+    )
+
+    token_entropy_percentile_threshold: float = field(
+        default=0.0,
+        metadata={
+            "help": "The percentile threshold for token entropy. If set to a value greater than 0.0, the model will "
+            "only consider tokens with entropy above this threshold when calculating the loss."
+        },
+    )
+
+    epsilon_low: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "The lower bound for the epsilon value used in the GRPO algorithm. If not set, it will default to the "
+            "value of `epsilon`."
+        },
+    )
+
+    epsilon_high: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "The upper bound for the epsilon value used in the GRPO algorithm. If not set, it will default to the "
+            "value of `epsilon`."
+        },
+    )
+
 
 @dataclass
 class SFTConfig(trl.SFTConfig):
