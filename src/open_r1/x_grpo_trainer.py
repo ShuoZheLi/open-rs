@@ -1006,10 +1006,12 @@ class GRPOTrainer(Trainer):
 
         # Log the metrics
         mode = "eval" if self.control.should_evaluate else "train"
+        log_dict = {}
 
         # Gather across all processes
         completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
-        self._metrics[mode]["completion_length"].append(completion_length)
+        # self._metrics[mode]["completion_length"].append(completion_length)
+        log_dict["completion_length"] = completion_length
 
         # truncated ratio
         if self.mask_truncated_completions:
@@ -1018,8 +1020,10 @@ class GRPOTrainer(Trainer):
             val = torch.tensor(completion_mask.size(0), device=self.accelerator.device)
             num_completions = self.accelerator.gather_for_metrics(val).sum().item()
             truncated_ratio = num_truncated_completions / num_completions
-            self._metrics[mode]["truncated_ratio"].append(truncated_ratio)
-            self._metrics[mode]["num_completions"].append(num_completions)
+            # self._metrics[mode]["truncated_ratio"].append(truncated_ratio)
+            # self._metrics[mode]["num_completions"].append(num_completions)
+            log_dict["truncated_ratio"] = truncated_ratio
+            log_dict["num_completions"] = num_completions
 
         reward_per_func = rewards_per_func.mean(0)
         for i, reward_func in enumerate(self.reward_funcs):
@@ -1027,10 +1031,13 @@ class GRPOTrainer(Trainer):
                 reward_func_name = reward_func.config._name_or_path.split("/")[-1]
             else:
                 reward_func_name = reward_func.__name__
-            self._metrics[mode][f"rewards/{reward_func_name}"].append(reward_per_func[i].item())
+            # self._metrics[mode][f"rewards/{reward_func_name}"].append(reward_per_func[i].item())
+            log_dict[f"rewards/{reward_func_name}"] = reward_per_func[i].item()
 
-        self._metrics[mode]["reward"].append(rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
+        # self._metrics[mode]["reward"].append(rewards.mean().item())
+        # self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
+        log_dict["reward"] = rewards.mean().item()
+        log_dict["reward_std"] = std_grouped_rewards.mean().item()
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:
             prompts_to_log = gather_object(prompts_text)
@@ -1120,6 +1127,7 @@ class GRPOTrainer(Trainer):
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
             "advantages": advantages,
+            "log_dict": log_dict,
         }
 
     @profiling_decorator
@@ -1244,6 +1252,9 @@ class GRPOTrainer(Trainer):
             kept_token = self.accelerator.gather(kept_token).sum()
             entropy_mask_ratio =  kept_token / num_token
             self._metrics[mode]["entropy_mask_ratio"].append(entropy_mask_ratio.item())
+
+            for key, value in inputs["log_dict"].items():
+                self._metrics[mode][key].append(value)
 
         return total_loss
 
