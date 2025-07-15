@@ -61,6 +61,19 @@ class GRPOConfig(trl.GRPOConfig):
         default=0.0, 
         metadata={"help": "Coefficient for the entropy bonus to encourage exploration."}
     )
+    divergence_type: str = field(
+        default="kl",  # Options: "kl", "js", "hellinger"
+        metadata={
+            "help": "kl, skl_approx, skl"
+        },
+    )
+    skl_alpha: float = field(
+        default=0.8,
+        metadata={
+            "help": "The alpha value for interpolation of pi and pi_ref. This is only used if "
+            "`divergence_type` is set to 'skl' or 'skl_approx'."
+        },
+    )
 
     mask_truncated_completions: bool = field(
         default=False,
@@ -92,6 +105,12 @@ class GRPOConfig(trl.GRPOConfig):
             "help": "The upper bound for the epsilon value used in the GRPO algorithm. If not set, it will default to the "
             "value of `epsilon`."
         },
+    )
+
+    eval_num_generations: Optional[int] = field(
+        default=None,
+        metadata={"help": "# completions per prompt *during evaluation* "
+                    "(defaults to num_generations if None)"}
     )
 
 

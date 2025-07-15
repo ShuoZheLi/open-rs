@@ -46,10 +46,10 @@ from datasets import load_dataset
 from transformers import set_seed
 from transformers.trainer_utils import get_last_checkpoint
 
-from open_r1.configs import SFTConfig
-from open_r1.utils import get_tokenizer
-from open_r1.utils.callbacks import get_callbacks
-from open_r1.utils.wandb_logging import init_wandb_training
+from configs import SFTConfig
+from utils import get_tokenizer
+from utils.callbacks import get_callbacks
+from utils.wandb_logging import init_wandb_training
 from trl import (
     ModelConfig,
     ScriptArguments,
@@ -59,6 +59,7 @@ from trl import (
     get_peft_config,
     get_quantization_config,
 )
+from CustomSFTTrainer import CustomSFTTrainer
 
 
 logger = logging.getLogger(__name__)
@@ -98,15 +99,115 @@ def main(script_args, training_args, model_args):
         init_wandb_training(training_args)
 
     ################
-    # Load datasets
-    ################
-    dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
-
-    ################
     # Load tokenizer
     ################
     tokenizer = get_tokenizer(model_args, training_args)
-    tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"pad_token": "<|reserved_special_token_0|>"})
+
+    # def tokenize(example):
+    #     full = tokenizer(
+    #         example["text"],
+    #         truncation=True,
+    #         padding=False,
+    #         max_length=training_args.max_seq_length,
+    #         return_tensors=None,
+    #     )
+    #     input_ids = full["input_ids"]
+
+    #     # Mask all tokens before the assistant role begins
+    #     full_text = example["text"]
+    #     # assistant_start = full_text.find("Assistant:")
+    #     assistant_prefix = tokenizer.apply_chat_template(
+    #         [{"role": "assistant", "content": ""}],
+    #         tokenize=False,
+    #         add_generation_prompt=False,
+    #     ).strip()
+    #     assistant_start = full_text.find(assistant_prefix)
+
+    #     if assistant_start == -1:
+    #         labels = [-100] * len(input_ids)
+    #     else:
+    #         prefix = tokenizer(full_text[:assistant_start], add_special_tokens=False)["input_ids"]
+    #         prefix_len = len(prefix)
+    #         labels = [-100] * prefix_len + input_ids[prefix_len:]
+
+    #     # if the last token is not the eos token, append it
+    #     if input_ids[-1] != tokenizer.eos_token_id:
+    #         full["input_ids"].append(tokenizer.eos_token_id)
+    #         labels.append(-100)
+    #     full["labels"] = labels
+    #     return full
+
+    ################
+    # Load datasets
+    ################
+    def format_chat(example):
+        messages = []
+
+        if training_args.system_prompt is not None:
+            messages.append({"role": "system", "content": training_args.system_prompt})
+        messages.append({"role": "user", "content": example["question"]})
+        messages.append({"role": "assistant", "content": example["think_answer"]})
+
+        return {
+            "text": tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False
+            )
+        }
+
+    def tokenize(example):
+        full = tokenizer(
+            example["text"],
+            truncation=True,
+            padding=False,
+            max_length=training_args.max_seq_length,
+            return_tensors=None,
+        )
+        input_ids = full["input_ids"]
+
+        full_text = example["text"]
+        marker = "<|im_start|>assistant"         # the literal prefix in your template
+        idx = full_text.find(marker)
+
+        if idx == -1:
+            labels = [-100] * len(input_ids)
+        else:
+            # token-ize everything up to that marker
+            prefix_ids = tokenizer(
+                full_text[:idx],
+                add_special_tokens=False
+            )["input_ids"]
+            # prefix_len = len(prefix_ids)
+            # # mask the prompt + system + user, leave assistant’s tokens
+            # labels = [-100] * prefix_len + input_ids[prefix_len:]
+            marker_ids = tokenizer(marker, add_special_tokens=False)["input_ids"]
+            prefix_len = len(prefix_ids) + len(marker_ids)
+            labels = [-100] * prefix_len + input_ids[prefix_len:]
+
+
+        # append EOS if missing (and mask it)
+        if input_ids[-1] != tokenizer.eos_token_id:
+            full["input_ids"].append(tokenizer.eos_token_id)
+            labels.append(-100)
+
+        full["labels"] = labels
+        return full
+
+
+    # raw_dset = load_dataset("parquet", script_args.dataset_name,)
+    raw_dset = load_dataset("parquet", data_files={"train": script_args.dataset_name})
+    dataset = raw_dset.map(format_chat, remove_columns=raw_dset["train"].column_names)
+    dataset = dataset.map(tokenize, remove_columns=["text"])
+
+    # decoded = tokenizer.decode(dataset["train"]['input_ids'][0])
+    # visible_labels = [l if l != -100 else -1 for l in dataset["train"]['labels'][0]]
+    # visible_tokens = [tokenizer.decode([t]) for t in dataset["train"]['input_ids'][0]]
+    # print(list(zip(visible_tokens, visible_labels)))
+
+    # import pdb; pdb.set_trace()
 
     ###################
     # Model init kwargs
@@ -130,7 +231,7 @@ def main(script_args, training_args, model_args):
     ############################
     # Initialize the SFT Trainer
     ############################
-    trainer = SFTTrainer(
+    trainer = CustomSFTTrainer(
         model=model_args.model_name_or_path,
         args=training_args,
         train_dataset=dataset[script_args.dataset_train_split],
@@ -139,6 +240,8 @@ def main(script_args, training_args, model_args):
         peft_config=get_peft_config(model_args),
         callbacks=get_callbacks(training_args, model_args),
     )
+
+    trainer.model.config.pad_token_id = tokenizer.pad_token_id # updating model config
 
     ###############
     # Training loop

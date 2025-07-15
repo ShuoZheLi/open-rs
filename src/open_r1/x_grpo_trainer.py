@@ -318,6 +318,10 @@ class GRPOTrainer(Trainer):
         self.epsilon_low = args.epsilon_low if args.epsilon_low is not None else args.epsilon
         self.epsilon_high = args.epsilon_high if args.epsilon_high is not None else args.epsilon
 
+        # divergence term
+        self.divergence_type = args.divergence_type
+        self.skl_alpha = args.skl_alpha
+
         # Reference model
         self.beta = args.beta
         # if self.beta == 0.0:
@@ -390,6 +394,10 @@ class GRPOTrainer(Trainer):
         self.temperature = args.temperature
         self.use_vllm = args.use_vllm
 
+        # parameters for evaluation
+        self.eval_num_generations = args.eval_num_generations if args.eval_num_generations else args.num_generations
+        self.train_num_generations = args.num_generations
+
         # Multi-step
         self.num_iterations = args.num_iterations  # = 𝜇 in the GRPO paper
         self.epsilon = args.epsilon
@@ -426,19 +434,19 @@ class GRPOTrainer(Trainer):
         num_processes = self.accelerator.num_processes
         global_batch_size = args.per_device_train_batch_size * num_processes
         possible_values = [n_gen for n_gen in range(2, global_batch_size + 1) if (global_batch_size) % n_gen == 0]
-        if self.num_generations not in possible_values:
+        if self.train_num_generations not in possible_values:
             raise ValueError(
                 f"The global train batch size ({num_processes} x {args.per_device_train_batch_size}) must be evenly "
-                f"divisible by the number of generations per prompt ({self.num_generations}). Given the current train "
+                f"divisible by the number of generations per prompt ({self.train_num_generations}). Given the current train "
                 f"batch size, the valid values for the number of generations are: {possible_values}."
             )
         if self.args.eval_strategy != "no":
             global_batch_size = args.per_device_eval_batch_size * num_processes
             possible_values = [n_gen for n_gen in range(2, global_batch_size + 1) if (global_batch_size) % n_gen == 0]
-            if self.num_generations not in possible_values:
+            if self.eval_num_generations not in possible_values:
                 raise ValueError(
                     f"The global eval batch size ({num_processes} x {args.per_device_eval_batch_size}) must be evenly "
-                    f"divisible by the number of generations per prompt ({self.num_generations}). Given the current "
+                    f"divisible by the number of generations per prompt ({self.eval_num_generations}). Given the current "
                     f"eval batch size, the valid values for the number of generations are: {possible_values}."
                 )
 
@@ -640,8 +648,8 @@ class GRPOTrainer(Trainer):
         )
         return RepeatRandomSampler(
             data_source=train_dataset,
-            mini_repeat_count=self.num_generations,
-            batch_size=effective_batch_size // self.num_generations,
+            mini_repeat_count=self.train_num_generations,
+            batch_size=effective_batch_size // self.train_num_generations,
             repeat_count=self.num_iterations,
             seed=self.args.seed,
     )
@@ -651,9 +659,10 @@ class GRPOTrainer(Trainer):
         # See _get_train_sampler for an explanation of the sampler.
         return RepeatRandomSampler(
             data_source=eval_dataset,
-            mini_repeat_count=self.num_generations,
+            mini_repeat_count=self.eval_num_generations,
             seed=self.args.seed,
         )
+
 
     def _enable_gradient_checkpointing(self, model: PreTrainedModel, args: GRPOConfig) -> PreTrainedModel:
         """Enables gradient checkpointing for the model."""
@@ -832,6 +841,46 @@ class GRPOTrainer(Trainer):
     def _generate_and_score_completions(
         self, inputs: dict[str, Union[torch.Tensor, Any]]
     ) -> dict[str, Union[torch.Tensor, Any]]:
+        if self.control.should_evaluate:
+            self.num_generations = self.eval_num_generations
+            if self.use_vllm:
+                # self.sampling_params.n = self.eval_num_generations
+                if self.args.vllm_guided_decoding_regex is not None:
+                    guided_decoding = GuidedDecodingParams(backend="outlines", regex=self.args.vllm_guided_decoding_regex)
+                else:
+                    guided_decoding = None
+                self.sampling_params = SamplingParams(
+                        max_tokens=self.max_completion_length,
+                        guided_decoding=guided_decoding,
+                        n=self.eval_num_generations,  # <-- use the passed-in value
+                        temperature=self.temperature,
+                        top_p=self.args.top_p,
+                        top_k=-1 if self.args.top_k is None else self.args.top_k,
+                        min_p=0.0 if self.args.min_p is None else self.args.min_p,
+                        repetition_penalty=self.args.repetition_penalty,
+                    )
+            else:
+                self.generation_config.num_return_sequences = self.eval_num_generations
+        else:
+            self.num_generations = self.train_num_generations
+            if self.use_vllm:
+                # self.sampling_params.n = self.train_num_generations
+                if self.args.vllm_guided_decoding_regex is not None:
+                    guided_decoding = GuidedDecodingParams(backend="outlines", regex=self.args.vllm_guided_decoding_regex)
+                else:
+                    guided_decoding = None
+                self.sampling_params = SamplingParams(
+                        max_tokens=self.max_completion_length,
+                        guided_decoding=guided_decoding,
+                        n=self.train_num_generations,  # <-- use the passed-in value
+                        temperature=self.temperature,
+                        top_p=self.args.top_p,
+                        top_k=-1 if self.args.top_k is None else self.args.top_k,
+                        min_p=0.0 if self.args.min_p is None else self.args.min_p,
+                        repetition_penalty=self.args.repetition_penalty,
+                    )
+            else:
+                self.generation_config.num_return_sequences = self.train_num_generations
         device = self.accelerator.device
         prompts = [x["grpo_prompt"]["prompt"] for x in inputs]
         prompts_text = [maybe_apply_chat_template(example["grpo_prompt"], self.processing_class)["prompt"] for example in inputs]
@@ -1166,9 +1215,18 @@ class GRPOTrainer(Trainer):
 
         # Compute the KL divergence between the model and the reference model
         ref_per_token_logps = inputs["ref_per_token_logps"]
-        per_token_kl = (
-            torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-        )
+
+        # differnt divergence terms
+        if self.divergence_type == "kl":
+            per_token_kl = (
+                torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
+            )
+        elif self.divergence_type == "skl_approx":
+            interp = torch.log(self.skl_alpha * per_token_logps.exp() + (1 - self.skl_alpha) * ref_per_token_logps.exp())
+            per_token_kl = (
+                torch.exp(interp - per_token_logps) - (interp - per_token_logps) - 1
+            )
+
 
         # Compute the loss
         advantages = inputs["advantages"]
@@ -1206,6 +1264,10 @@ class GRPOTrainer(Trainer):
             mode = "eval" if self.control.should_evaluate else "train"
 
             # if self.beta != 0.0:
+            if self.divergence_type != "kl":
+                per_token_kl = (
+                    torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
+                )
             mean_kl = ((per_token_kl * completion_mask).sum(dim=1) / completion_mask.sum(dim=1).clamp(min=1.0)).mean()
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
 
