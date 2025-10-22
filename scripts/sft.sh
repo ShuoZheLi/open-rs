@@ -4,7 +4,7 @@ ACCELERATE_LOG_LEVEL=info accelerate launch \
 --num_processes=4 \
 -- \
 src/open_r1/sft.py \
---model_name_or_path /nfs/shuozhe/saved_model/Qwen2.5-1.5B \
+--model_name_or_path /nfs/shuozhe/saved_model/Llama-3.2-1B \
 --dataset_name /nfs/shuozhe/data_process/cleaned_5120_sampled_with_think_answer.parquet \
 --system_prompt "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer, and put your final answer within \\boxed{{}} . The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. Note that respond by English, NOT use other languages." \
 --learning_rate 2.0e-5 \
@@ -17,7 +17,8 @@ src/open_r1/sft.py \
 --bf16 \
 --logging_steps 1 \
 --save_strategy "epoch" \
---output_dir data/Qwen2.5-1.5B-sft_entropy_3 \
+--output_dir data/Llama-3.2-1B-sft_entropy \
 --eval_strategy "no" \
 --eval_steps 100 \
 --wandb_project "Entropy" \
+> ./logs/Llama-3.2-1B-sft_entropy.log 2>&1
